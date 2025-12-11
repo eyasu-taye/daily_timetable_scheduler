@@ -1,4 +1,4 @@
-<!doctype html>
+<!-- <!doctype html>
 <html lang="en">
 <head>
   <meta charset="utf-8" />
@@ -243,6 +243,285 @@
 
     function escapeHtml(s){ return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
     function hexToRgba(hex,alpha){ if(!hex) hex='#60a5fa'; const cleaned = hex.replace('#',''); const bigint = parseInt(cleaned,16); const r=(bigint>>16)&255; const g=(bigint>>8)&255; const b=bigint&255; return `rgba(${r},${g},${b},${alpha})`; }
+
+    // initial load
+    init();
+  </script>
+</body>
+</html> -->
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Interactive Timetable Scheduler — Weekly + Recurrence + Drag/Drop</title>
+  <style>
+    :root{ --bg:#0f1724; --card:#0b1220; --muted:#94a3b8; --accent:#60a5fa; --text:#e6eef8; --slot-height:48px; font-family: Inter, system-ui, -apple-system, "Segoe UI", Roboto, Arial; }
+    *{box-sizing:border-box}
+    html,body{height:100%;margin:0;background:linear-gradient(180deg,#071021 0%, #071226 100%);color:var(--text)}
+    .app{max-width:1300px;margin:20px auto;padding:18px;border-radius:12px;background:linear-gradient(180deg, rgba(255,255,255,0.02), rgba(255,255,255,0.01));box-shadow:0 6px 30px rgba(2,6,23,0.6)}
+    header{display:flex;gap:12px;align-items:center;justify-content:space-between}
+    h1{margin:0;font-size:18px}
+    .controls{display:flex;gap:8px;align-items:center}
+    button{background:transparent;border:1px solid rgba(255,255,255,0.06);padding:8px 10px;border-radius:8px;color:var(--text);cursor:pointer}
+    button.primary{background:linear-gradient(90deg,var(--accent),#60e6a8);border:none;color:#05202b}
+    .layout{display:grid;grid-template-columns:340px 1fr;gap:16px;margin-top:14px}
+    .panel{background:rgba(255,255,255,0.02);padding:12px;border-radius:10px}
+    label{display:block;font-size:13px;color:var(--muted);margin-bottom:6px}
+    input,select,textarea{width:100%;padding:8px;border-radius:8px;border:1px solid rgba(255,255,255,0.04);background:transparent;color:var(--text)}
+    .task-bank-controls{display:flex;gap:6px;margin-bottom:8px}
+    .banks{display:flex;gap:6px;flex-wrap:wrap;margin-bottom:8px}
+    .bank-pill{padding:6px 8px;border-radius:999px;border:1px solid rgba(255,255,255,0.04);cursor:pointer}
+    .bank-pill.active{background:rgba(255,255,255,0.03)}
+    .task-list{display:flex;flex-direction:column;gap:8px;max-height:300px;overflow:auto;margin-top:6px}
+    .task-item{padding:8px;border-radius:8px;border:1px dashed rgba(255,255,255,0.04);cursor:grab;display:flex;justify-content:space-between;align-items:center}
+    .task-meta{font-size:12px;color:var(--muted)}
+    .task-actions{display:flex;gap:6px}
+    .timetable{overflow:auto;border-radius:8px;padding:6px}
+    .calendar{min-width:900px;border-collapse:collapse;width:100%}
+    .calendar th{background:rgba(255,255,255,0.03);padding:8px;border:1px solid rgba(255,255,255,0.02);font-weight:600}
+    .calendar td{height:var(--slot-height);vertical-align:top;padding:6px;border:1px solid rgba(255,255,255,0.02);background:linear-gradient(180deg, rgba(0,0,0,0.02), transparent)}
+    .time-col{width:70px;background:rgba(255,255,255,0.01);text-align:center;color:var(--muted);font-size:13px}
+    .slot{position:relative;height:var(--slot-height)}
+    .placed{position:absolute;left:6px;right:6px;padding:6px;border-radius:6px;color:#022;cursor:grab;box-shadow:0 2px 8px rgba(0,0,0,0.25)}
+    .small{font-size:12px;color:var(--muted)}
+    .footer{display:flex;justify-content:space-between;align-items:center;margin-top:12px}
+    @media (max-width:1000px){.layout{grid-template-columns:1fr}.calendar{min-width:700px}}
+  </style>
+</head>
+<body>
+  <div class="app" role="application">
+    <header>
+      <div>
+        <h1>Interactive Timetable Scheduler — Weekly</h1>
+        <div class="small">Drag tasks from banks to any day/time. Recurring tasks can be placed automatically.</div>
+      </div>
+      <div class="controls">
+        <button id="loadBtn">Load</button>
+        <button id="exportBtn">Export JSON</button>
+        <button id="importBtn">Import JSON</button>
+        <button id="printBtn" class="primary">Print</button>
+      </div>
+    </header>
+
+    <div class="layout">
+      <aside class="panel">
+        <div>
+          <label for="bankName">Create/Select Bank</label>
+          <div style="display:flex;gap:6px">
+            <input id="bankName" placeholder="New bank name" />
+            <button id="createBank">Create</button>
+          </div>
+        </div>
+
+        <div class="banks" id="banksRoot" aria-live="polite"></div>
+
+        <div style="margin-top:8px;display:flex;gap:8px;align-items:center">
+          <input id="searchTask" placeholder="Search tasks..." />
+          <button id="filterBtn">Filter</button>
+        </div>
+
+        <div style="margin-top:12px">
+          <label for="taskName">Task name</label>
+          <input id="taskName" placeholder="e.g., Deep work / Prayer" />
+        </div>
+
+        <div style="display:flex;gap:8px;margin-top:8px">
+          <div style="flex:1">
+            <label for="taskDur">Duration (minutes)</label>
+            <input id="taskDur" type="number" value="60" />
+          </div>
+          <div style="width:120px">
+            <label for="taskColor">Color</label>
+            <input id="taskColor" type="color" value="#60a5fa" />
+          </div>
+        </div>
+
+        <div style="margin-top:8px">
+          <label for="category">Category / Tag</label>
+          <input id="category" placeholder="Work / Personal / Prayer" />
+        </div>
+
+        <div style="margin-top:8px;display:flex;gap:8px;align-items:center">
+          <div style="flex:1">
+            <label for="recurrence">Recurrence</label>
+            <select id="recurrence">
+              <option value="none">None</option>
+              <option value="daily">Daily</option>
+              <option value="weekly">Weekly</option>
+            </select>
+          </div>
+          <div style="width:130px">
+            <label for="bankSelect">Add to bank</label>
+            <select id="bankSelect"></select>
+          </div>
+        </div>
+
+        <div style="margin-top:10px">
+          <label for="notes">Notes (optional)</label>
+          <textarea id="notes" rows="2" placeholder="Short notes"></textarea>
+        </div>
+
+        <div style="display:flex;gap:8px;margin-top:10px">
+          <button id="addTask">Add to task bank</button>
+          <button id="duplicateTask">Duplicate selected</button>
+          <button id="clearBank">Clear bank</button>
+        </div>
+
+        <div style="margin-top:12px">
+          <label>Task bank</label>
+          <div class="task-list" id="taskBank" aria-live="polite"></div>
+        </div>
+
+        <hr style="margin:12px 0;border-color:rgba(255,255,255,0.02)" />
+
+        <div>
+          <label>Direct place task (no drag)</label>
+          <div style="display:flex;gap:8px;align-items:center">
+            <select id="placeTaskSelect"></select>
+            <input id="placeStart" type="time" />
+            <select id="placeDay"><option value="">Today</option><option value="0">Mon</option><option value="1">Tue</option><option value="2">Wed</option><option value="3">Thu</option><option value="4">Fri</option><option value="5">Sat</option><option value="6">Sun</option></select>
+            <button id="placeBtn">Place</button>
+          </div>
+          <div class="small" style="margin-top:6px">Choose start time and day. If recurrence set on the task, placing will create instances accordingly.</div>
+        </div>
+
+        <div style="margin-top:12px">
+          <label>Timetable range</label>
+          <div style="display:flex;gap:8px">
+            <input id="startTime" type="time" value="00:00" />
+            <input id="endTime" type="time" value="23:30" />
+          </div>
+          <div class="small" style="margin-top:6px">If end time is earlier than start, it will treat as next day.</div>
+          <div style="display:flex;gap:8px;margin-top:8px">
+            <button id="renderGrid">Render</button>
+            <button id="resetGrid">Reset slots</button>
+          </div>
+        </div>
+
+      </aside>
+
+      <main class="panel">
+        <div class="timetable">
+          <div id="calendarRoot"></div>
+        </div>
+        <div class="footer">
+          <div class="small">Saved to browser localStorage automatically (including banks). Use Export/Import to share.</div>
+          <div class="small">Tips: drag to move, double-click to edit, right-click to remove.</div>
+        </div>
+      </main>
+    </div>
+  </div>
+
+  <input id="importFile" type="file" accept="application/json" style="display:none" />
+
+  <script>
+    // Weekly calendar with recurring tasks and drag/drop movement
+    const q=(s,el=document)=>el.querySelector(s); const qa=(s,el=document)=>Array.from(el.querySelectorAll(s));
+
+    const DAYS = ['Mon','Tue','Wed','Thu','Fri','Sat','Sun'];
+    const FULL_DAYS = ['Monday','Tuesday','Wednesday','Thursday','Friday','Saturday','Sunday'];
+    const SLOT_MIN = 30; // minutes
+
+    // State
+    let banks = []; // {id,name,tasks:[]}
+    let placed = []; // {id,name,duration,color,category,notes,recurrence,startIso,endIso,bankId,day}
+
+    // DOM refs
+    const gridRoot = q('#calendarRoot');
+    const taskBank = q('#taskBank'); const addTaskBtn = q('#addTask'); const duplicateTaskBtn = q('#duplicateTask'); const clearBankBtn = q('#clearBank'); const exportBtn = q('#exportBtn'); const importBtn = q('#importBtn'); const loadBtn = q('#loadBtn'); const printBtn = q('#printBtn'); const renderGridBtn = q('#renderGrid'); const resetGridBtn = q('#resetGrid'); const startTimeInput = q('#startTime'); const endTimeInput = q('#endTime'); const importFile = q('#importFile'); const bankNameInput = q('#bankName'); const createBankBtn = q('#createBank'); const banksRoot = q('#banksRoot'); const bankSelect = q('#bankSelect'); const searchInput = q('#searchTask'); const filterBtn = q('#filterBtn'); const placeTaskSelect = q('#placeTaskSelect'); const placeStart = q('#placeStart'); const placeDay = q('#placeDay'); const placeBtn = q('#placeBtn');
+
+    function init(){ loadState(); ensureDefaultBank(); bind(); renderBanks(); renderTaskBank(); renderPlaceSelect(); renderGrid(); renderPlaced(); }
+
+    function bind(){ addTaskBtn.addEventListener('click', onAddTask); duplicateTaskBtn.addEventListener('click', onDuplicate); clearBankBtn.addEventListener('click', ()=>{ if(confirm('Clear current bank tasks?')){ const b=getActiveBank(); if(b){ b.tasks=[]; saveState(); renderTaskBank(); renderPlaceSelect(); }}}); exportBtn.addEventListener('click', onExport); importBtn.addEventListener('click', ()=>importFile.click()); importFile.addEventListener('change', onImportFile); loadBtn.addEventListener('click', ()=>{ loadState(true); renderBanks(); renderTaskBank(); renderPlaceSelect(); renderGrid(); renderPlaced(); alert('Loaded'); }); printBtn.addEventListener('click', ()=>window.print()); renderGridBtn.addEventListener('click', ()=>{ renderGrid(true); }); resetGridBtn.addEventListener('click', ()=>{ if(confirm('Remove all placed tasks?')){ placed=[]; saveState(); renderPlaced(); }}); createBankBtn.addEventListener('click', ()=>{ const name=bankNameInput.value.trim(); if(!name) return alert('Enter bank name'); createBank(name); bankNameInput.value=''; }); searchInput.addEventListener('input', ()=>renderTaskBank()); filterBtn.addEventListener('click', ()=>{ const f = prompt('Filter by category (leave empty to clear)'); renderTaskBank(f); }); placeBtn.addEventListener('click', onDirectPlace);
+    }
+
+    function ensureDefaultBank(){ if(banks.length===0) createBank('Default'); }
+    function createBank(name){ const id='b_'+Date.now(); banks.push({id,name,tasks:[]}); saveState(); renderBanks(); setActiveBank(id); }
+    function setActiveBank(id){ banks.forEach(b=>b.active=(b.id===id)); saveState(); renderBanks(); renderTaskBank(); renderPlaceSelect(); }
+    function getActiveBank(){ return banks.find(b=>b.active)||banks[0]; }
+
+    // Tasks in bank
+    function onAddTask(){ const name=q('#taskName').value.trim(); const dur=parseInt(q('#taskDur').value,10)||30; const color=q('#taskColor').value||'#60a5fa'; const cat=q('#category').value.trim(); const notes=q('#notes').value.trim(); const rec=q('#recurrence').value; const bankId=bankSelect.value||getActiveBank().id; if(!name) return alert('Please enter a task name'); const t={id:'t_'+Date.now(),name,duration:dur,color,category:cat,notes,recurrence:rec}; const bank=banks.find(b=>b.id===bankId); if(!bank) return alert('No bank selected'); bank.tasks.push(t); saveState(); renderTaskBank(); renderPlaceSelect(); q('#taskName').value=''; q('#notes').value=''; }
+
+    function onDuplicate(){ const sel = placeTaskSelect.value; if(!sel) return alert('Select a task to duplicate'); const [bankId,taskId]=sel.split('::'); const bank=banks.find(b=>b.id===bankId); if(!bank) return; const t=bank.tasks.find(x=>x.id===taskId); if(!t) return; const copy={...t,id:'t_'+Date.now(),name:t.name+' (copy)'}; bank.tasks.push(copy); saveState(); renderTaskBank(); renderPlaceSelect(); }
+
+    function renderBanks(){ banksRoot.innerHTML=''; bankSelect.innerHTML=''; banks.forEach(b=>{ const pill=document.createElement('div'); pill.className='bank-pill'+(b.active?' active':''); pill.textContent=b.name; pill.title='Click to select bank'; pill.addEventListener('click', ()=>setActiveBank(b.id)); banksRoot.appendChild(pill); const opt=document.createElement('option'); opt.value=b.id; opt.textContent=b.name; bankSelect.appendChild(opt); }); }
+
+    function renderTaskBank(filterCategory=''){ taskBank.innerHTML=''; const bank=getActiveBank(); if(!bank) return; const qtxt=searchInput.value.trim().toLowerCase(); const list=bank.tasks.filter(t=>{ if(filterCategory && t.category!==filterCategory) return false; if(qtxt && !(t.name.toLowerCase().includes(qtxt) || (t.category||'').toLowerCase().includes(qtxt) || (t.notes||'').toLowerCase().includes(qtxt))) return false; return true; }); if(list.length===0){ taskBank.innerHTML='<div class="small">No tasks in this bank.</div>'; return; } list.forEach(t=>{ const el=document.createElement('div'); el.className='task-item'; el.draggable=true; el.dataset.id=t.id; el.innerHTML=`<div><strong>${escapeHtml(t.name)}</strong><div class="task-meta">${t.duration} min • ${escapeHtml(t.category||'')} ${t.recurrence!=='none' ? '• '+t.recurrence:''}</div></div>`; el.addEventListener('dragstart', e=>{ e.dataTransfer.setData('text/plain', JSON.stringify({type:'bank',bankId:bank.id,taskId:t.id})); e.dataTransfer.effectAllowed='copy'; }); const actions=document.createElement('div'); actions.className='task-actions'; const dup=document.createElement('button'); dup.textContent='⎘'; dup.title='Duplicate'; dup.addEventListener('click',(ev)=>{ ev.stopPropagation(); const copy={...t,id:'t_'+Date.now(),name:t.name+' (copy)'}; bank.tasks.push(copy); saveState(); renderTaskBank(); renderPlaceSelect(); }); const del=document.createElement('button'); del.textContent='🗑'; del.title='Delete'; del.addEventListener('click',(ev)=>{ ev.stopPropagation(); if(confirm('Delete this task?')){ bank.tasks=bank.tasks.filter(x=>x.id!==t.id); saveState(); renderTaskBank(); renderPlaceSelect(); } }); actions.appendChild(dup); actions.appendChild(del); el.appendChild(actions); el.addEventListener('dblclick', ()=>{ editTask(bank.id,t.id); }); taskBank.appendChild(el); }); }
+
+    function renderPlaceSelect(){ placeTaskSelect.innerHTML=''; banks.forEach(b=>{ b.tasks.forEach(t=>{ const opt=document.createElement('option'); opt.value=`${b.id}::${t.id}`; opt.textContent=`${b.name} — ${t.name} (${t.duration}m${t.recurrence!=='none'?', '+t.recurrence:''})`; placeTaskSelect.appendChild(opt); }); }); }
+
+    function editTask(bankId,taskId){ const bank=banks.find(b=>b.id===bankId); if(!bank) return; const t=bank.tasks.find(x=>x.id===taskId); if(!t) return; const newName=prompt('Edit task name', t.name); if(newName===null) return; t.name=newName.trim()||t.name; const newDur=prompt('Edit duration in minutes', String(t.duration)); if(newDur!==null){ const d=parseInt(newDur,10); if(isFinite(d)&&d>0){ t.duration=d; } } saveState(); renderTaskBank(); renderPlaceSelect(); }
+
+    // WEEKLY GRID
+    function renderGrid(force=false){ const start=parseTime(startTimeInput.value||'00:00'); const end=parseTime(endTimeInput.value||'23:30'); const timeline=buildTimeline(start,end); // build table
+      let html=''; html+=`<table class="calendar"><thead><tr><th class="time-col"></th>`; FULL_DAYS.forEach(d=> html+=`<th>${d}</th>`); html+='</tr></thead><tbody>';
+      timeline.forEach(slot=>{ html+=`<tr><td class="time-col">${slot.label}</td>`; for(let dayIdx=0; dayIdx<7; dayIdx++){ html+=`<td class="slot" data-time="${slot.iso}" data-day="${dayIdx}" ondragover="onDragOver(event)" ondragleave="onDragLeave(event)" ondrop="onDrop(event)"></td>`; } html+='</tr>'; }); html+='</tbody></table>'; gridRoot.innerHTML=html; renderPlaced(); }
+
+    // Drag over helpers used by inline handlers
+    function onDragOver(e){ e.preventDefault(); const td = e.currentTarget || e.target; td.classList && td.classList.add('highlight'); e.dataTransfer.dropEffect='copy'; }
+    function onDragLeave(e){ const td = e.currentTarget || e.target; td.classList && td.classList.remove('highlight'); }
+
+    function renderPlaced(){ // clear slots
+      qa('.slot').forEach(s=>s.innerHTML='');
+      // place each placed item
+      placed.forEach(p=>{
+        const slots = qa(`.slot[data-day='${p.day}'][data-time='${p.startIso}']`);
+        if(slots.length===0) return; // if start slot not visible
+        const slot = slots[0];
+        const el = document.createElement('div');
+        el.className='placed';
+        el.dataset.placedId = p.id;
+        el.style.background = p.color;
+        el.style.height = `calc(${Math.max(1, Math.round(p.duration / SLOT_MIN))} * var(--slot-height) - 8px)`;
+        el.style.top = '4px';
+        el.innerHTML = `<strong>${escapeHtml(p.name)}</strong><div class="small">${formatTimeLabel(p.startIso)} — ${formatTimeLabel(p.endIso)} • ${p.duration}m ${p.recurrence!=='none'? '• '+p.recurrence:''}</div>`;
+        el.draggable = true;
+        el.addEventListener('dragstart', e=>{ e.dataTransfer.setData('text/plain', JSON.stringify({type:'placed',placedId:p.id})); e.dataTransfer.effectAllowed='move'; });
+        el.addEventListener('dblclick', ()=>editPlaced(p.id));
+        el.addEventListener('contextmenu', e=>{ e.preventDefault(); if(confirm('Remove this placed task?')){ placed = placed.filter(x=>x.id!==p.id); saveState(); renderPlaced(); } });
+        slot.appendChild(el);
+      });
+    }
+
+    // Drop handler used by inline ondrop
+    function onDrop(e){ e.preventDefault(); const td = e.currentTarget || e.target.closest('.slot'); if(!td) return; td.classList.remove('highlight'); const data = e.dataTransfer.getData('text/plain'); if(!data) return; let parsed; try{ parsed=JSON.parse(data);}catch(err){return}
+      const day = parseInt(td.dataset.day,10); const time = td.dataset.time;
+      if(parsed.type==='bank'){ const bankId = parsed.bankId; const taskId = parsed.taskId; const bank = banks.find(b=>b.id===bankId); if(!bank) return; const task = bank.tasks.find(t=>t.id===taskId); if(!task) return; placeTaskWithRecurrence(task, time, day, bankId); }
+      else if(parsed.type==='placed'){ const pid = parsed.placedId; const p = placed.find(x=>x.id===pid); if(!p) return; // move single placed instance
+        p.startIso = time; p.endIso = addMinutesISO(time,p.duration); p.day = day; saveState(); renderPlaced(); }
+    }
+
+    // Place task and handle recurrence: for daily create entries for all days; for weekly create on same weekday only; none -> single
+    function placeTaskWithRecurrence(task, startIso, dayIdx, bankId){ const dur = task.duration; if(task.recurrence==='daily'){ for(let d=0; d<7; d++){ const s = startIso; const e = addMinutesISO(s,dur); const p = makePlaced(task, s, e, bankId, d); placed.push(p); } }
+      else if(task.recurrence==='weekly'){ const s = startIso; const e = addMinutesISO(s,dur); const p = makePlaced(task, s, e, bankId, dayIdx); placed.push(p); }
+      else { const s = startIso; const e = addMinutesISO(s,dur); const p = makePlaced(task, s, e, bankId, dayIdx); placed.push(p); }
+      saveState(); renderPlaced(); }
+
+    function makePlaced(task,startIso,endIso,bankId,dayIdx){ return { id:'p_'+Date.now()+'_'+Math.random().toString(36).slice(2,7), name:task.name, duration:task.duration, color:task.color, category:task.category, notes:task.notes, recurrence:task.recurrence||'none', startIso, endIso, bankId, day:dayIdx }; }
+
+    function onDirectPlace(){ const sel = placeTaskSelect.value; if(!sel) return alert('Select a task to place'); const [bankId,taskId]=sel.split('::'); const bank=banks.find(b=>b.id===bankId); if(!bank) return; const task=bank.tasks.find(t=>t.id===taskId); if(!task) return; const time = placeStart.value; if(!time) return alert('Choose start time'); const dayVal = placeDay.value; let dayIdx; if(dayVal==='') dayIdx = (new Date()).getDay()-1; // JS getDay: 0 Sun -> convert to 0=Mon
+      if(isNaN(dayIdx) || dayIdx<0) dayIdx=0; else dayIdx = parseInt(dayVal,10);
+      placeTaskWithRecurrence(task, time, dayIdx, bankId);
+    }
+
+    function editPlaced(id){ const p = placed.find(x=>x.id===id); if(!p) return; const newName = prompt('Edit name', p.name); if(newName===null) return; p.name=newName.trim()||p.name; const newDur = prompt('Edit duration (min)', String(p.duration)); if(newDur!==null){ const d=parseInt(newDur,10); if(isFinite(d)&&d>0){ p.duration=d; p.endIso=addMinutesISO(p.startIso,d); } } const newRec = prompt('Recurrence (none/daily/weekly)', p.recurrence||'none'); if(newRec!==null) p.recurrence = ['none','daily','weekly'].includes(newRec)?newRec:p.recurrence; saveState(); renderPlaced(); }
+
+    // Persistence
+    function saveState(){ const state={banks,placed,startTime:startTimeInput.value,endTime:endTimeInput.value}; localStorage.setItem('timetable_v3', JSON.stringify(state)); }
+    function loadState(showAlert=false){ const raw=localStorage.getItem('timetable_v3'); if(!raw) return; try{ const s=JSON.parse(raw); banks=s.banks||[]; placed=s.placed||[]; if(s.startTime) startTimeInput.value=s.startTime; if(s.endTime) endTimeInput.value=s.endTime; }catch(e){console.error(e)} if(showAlert) alert('Loaded saved timetable'); }
+
+    function onExport(){ const data={banks,placed,startTime:startTimeInput.value,endTime:endTimeInput.value,exportedAt:new Date().toISOString()}; const blob=new Blob([JSON.stringify(data,null,2)],{type:'application/json'}); const url=URL.createObjectURL(blob); const a=document.createElement('a'); a.href=url; a.download='timetable-export.json'; document.body.appendChild(a); a.click(); a.remove(); URL.revokeObjectURL(url); }
+    function onImportFile(e){ const f=e.target.files[0]; if(!f) return; const r=new FileReader(); r.onload=()=>{ try{ const data=JSON.parse(r.result); if(confirm('Replace current schedule with imported data?')){ banks=data.banks||[]; placed=data.placed||[]; if(data.startTime) startTimeInput.value=data.startTime; if(data.endTime) endTimeInput.value=data.endTime; saveState(); renderBanks(); renderTaskBank(); renderPlaceSelect(); renderGrid(); renderPlaced(); alert('Imported'); } }catch(err){ alert('Invalid JSON file'); } }; r.readAsText(f); importFile.value=''; }
+
+    // Time helpers
+    function parseTime(s){ const [hh,mm]=(s||'00:00').split(':').map(x=>parseInt(x,10)); return {hh,mm}; }
+    function addMinutesISO(iso,mins){ let [hh,mm]=iso.split(':').map(x=>parseInt(x,10)); let total=hh*60+mm+mins; total = ((total%1440)+1440)%1440; const H=String(Math.floor(total/60)).padStart(2,'0'); const M=String(total%60).padStart(2,'0'); return `${H}:${M}`; }
+    function buildTimeline(startObj,endObj){ const startMin=startObj.hh*60+startObj.mm; const endMin=endObj.hh*60+endObj.mm; let timeline=[]; let cur=startMin; const target = endMin<=startMin? endMin+1440:endMin; while(cur<target){ const h=Math.floor((cur%1440)/60); const m=cur%60; const iso = `${String(h).padStart(2,'0')}:${String(m).padStart(2,'0')}`; timeline.push({iso,label:formatTimeLabel(iso)}); cur+=SLOT_MIN; } return timeline; }
+    function formatTimeLabel(iso){ const [hh,mm]=iso.split(':').map(x=>parseInt(x,10)); const am = hh<12; const H = hh%12===0?12:hh%12; return `${H}:${String(mm).padStart(2,'0')} ${am?'AM':'PM'}`; }
+
+    function escapeHtml(s){ return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
 
     // initial load
     init();
